@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Linq;
 
 public class Program {
     public static void Main(string[] args) {
@@ -23,7 +24,7 @@ public class Program {
                 "locationCode": "STO-02",
                 "productName": "USB-C Cable",
                 "amount": 25.0,
-                "timestamp": "2026-03-18T06:15:30Z"
+                "timestamp": "2026-02-27T06:15:30Z"
                 }
             ]
             """;
@@ -42,29 +43,25 @@ public class Program {
                 // build lookup from the tracked entities so updates apply to tracked instances
                 var trackedById = allTransactions.ToDictionary(t => t.TransactionID);
 
-                // loop through transactions list from database
-                foreach (var transaction in transactions)
-                {
-                    var timeFromJson = DateTimeOffset.Parse(transaction.TimeStamp ?? "").ToUniversalTime();
-                    var now = DateTimeOffset.UtcNow;
-                    var timeDifference = now - timeFromJson;
-                    var greaterThan24h = timeDifference.TotalHours > 24;
-                    Console.WriteLine(timeDifference);
-                    Console.WriteLine(greaterThan24h);
+                // loop through transactions list from JSON input
+                foreach (var transaction in transactions) {
                     if (trackedById.TryGetValue(transaction.TransactionID, out var tracked))
                     {
                         // update the tracked entity if the transactionID is found in database
-                        tracked.CardNumber = transaction.CardNumber;
-                        tracked.LocationCode = transaction.LocationCode;
-                        tracked.ProductName = transaction.ProductName;
-                        tracked.amount = transaction.amount;
-                        tracked.TimeStamp = transaction.TimeStamp;
-                        tracked.Status = "active";
+                        // and it hasn't been finalized yet
+                        if (!string.Equals(tracked.Status, "finalized", StringComparison.OrdinalIgnoreCase))
+                        {
+                            tracked.CardNumber = transaction.CardNumber;
+                            tracked.LocationCode = transaction.LocationCode;
+                            tracked.ProductName = transaction.ProductName;
+                            tracked.amount = transaction.amount;
+                            tracked.TimeStamp = transaction.TimeStamp;
+                        }
                     }
                     else
                     {
                         // insert new record when transactionId is not found
-                        db.Transaction.Add(new Transaction {
+                        var added = new Transaction {
                             TransactionID = transaction.TransactionID,
                             CardNumber = transaction.CardNumber,
                             LocationCode = transaction.LocationCode,
@@ -72,13 +69,48 @@ public class Program {
                             amount = transaction.amount,
                             TimeStamp = transaction.TimeStamp,
                             Status = "active"
-                        });
+                        };
+
+                        db.Transaction.Add(added);
+                        // keep the lookup in sync so we don't try to add the same key again
+                        trackedById[added.TransactionID] = added;
                     }
                 }
+
+                // reinitialize transactions db list
+                allTransactions = db.Transaction.ToList();
+
+                var jsonById = transactions.ToDictionary(t => t.TransactionID);
+  
+                foreach (var db_transaction in allTransactions) {
+                    // calculate time difference for determining revocation and finalization
+                    if (!DateTimeOffset.TryParse(db_transaction.TimeStamp ?? "", out var timeFromDB))
+                        continue;
+
+                    timeFromDB = timeFromDB.ToUniversalTime();
+                    var now = DateTimeOffset.UtcNow;
+                    var timeDifference = now - timeFromDB;
+                    var lessThan24h = timeDifference.TotalHours < 24;
+                    // updated status based on transaction age and presence
+                    int dbId = db_transaction.TransactionID;
+                    if (lessThan24h) {
+                        if (!jsonById.TryGetValue(dbId, out _)) {
+                            db_transaction.Status = "revoked";
+                        }
+                        else {
+                            db_transaction.Status = "active";
+                        }
+                    }
+                    else {
+                        db_transaction.Status = "finalized";
+                    }
+                }
+    
                 // saveUpdates
                 db.SaveChanges();
             }
+        }
     }
-}
+
 
 

@@ -1,0 +1,9 @@
+# Build outputs
+/bin/
+/obj/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store

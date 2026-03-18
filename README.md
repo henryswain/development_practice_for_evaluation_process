@@ -24,3 +24,8 @@ For each iteration, I checked to see if the transaction id was present in the SQ
 After creating or updating the data, I updated the database reference so that I was starting with the newly updated data for the next step.
 
 To make the datetime calculation, I recorded the time present in the datebase, and the current time, checked the difference, and used an if condition to see whether I should update status to `revoked` or `finalized`.
+
+## assumptions
+The format of api response is exactly as follows:
+
+![API data model format](./gauranteed_data_model_from_api.png)
